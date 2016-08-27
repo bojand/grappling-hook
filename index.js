@@ -362,11 +362,12 @@ function createHooks(instance, config) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			const args = _.toArray(arguments);
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
 			const done = args.pop();
 			if (!_.isFunction(done)) {
 				throw new Error('Async methods should receive a callback as a final parameter');
 			}
-			doAsync(instance, hookObj, fn, args, done);
+			doAsync(ctx, hookObj, fn, args, done);
 		};
 	});
 }
@@ -376,14 +377,15 @@ function createSyncHooks(instance, config) {
 	_.forEach(config, function(fn, hook) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
 			const args = _.toArray(arguments);
 			let middleware = instance.getMiddleware(q.pre + ':' + hookObj.name);
 			let result;
 			middleware.push(function() {
-				result = fn.apply(instance, args);
+				result = fn.apply(ctx, args);
 			});
 			middleware = middleware.concat(instance.getMiddleware(q.post + ':' + hookObj.name));
-			iterateSyncMiddleware(instance, middleware, args);
+			iterateSyncMiddleware(ctx, middleware, args);
 			return result;
 		};
 	});
@@ -394,7 +396,8 @@ function createThenableHooks(instance, config) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			const args = _.toArray(arguments);
-			return doTheanable(instance, hookObj, fn, args);
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			return doTheanable(ctx, hookObj, fn, args);
 		};
 	});
 }
@@ -404,16 +407,17 @@ function createDynamicHooks(instance, config) {
 		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			var args = _.toArray(arguments);
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
 			var last = null;
 			if(args.length && _.isFunction(args[args.length - 1])) {
 				last = args[args.length - 1];
 			}
 			if (!_.isFunction(last)) {
-				return doTheanable(instance, hookObj, fn, args);
+				return doTheanable(ctx, hookObj, fn, args);
 			}
 			else {
 				last = args.pop();
-				doAsync(instance, hookObj, fn, args, last);
+				doAsync(ctx, hookObj, fn, args, last);
 			}
 		};
 	});
@@ -863,14 +867,19 @@ module.exports = {
 	 * grappling.attach(MyClass); // attach grappling-hook functionality to a 'class'
 	 */
 	attach: function attach(base, presets, opts) {//eslint-disable-line no-unused-vars
-		const args = _.toArray(arguments);
-		args.shift();
+		if(!opts && _.isObject(presets)) {
+			opts = presets;
+			presets = undefined;
+		}
+		var options = _.defaults({}, opts, {
+			attachToProtoype: false
+		});
 		const proto = (base.prototype)
 			? base.prototype
 			: base;
 		_.forEach(methods, function(fn, methodName) {
 			proto[methodName] = function() {
-				init.apply(this, args);
+				init.call(this, presets, options);
 				_.forEach(methods, (fn, methodName) => {
 					this[methodName] = fn.bind(this);
 				});

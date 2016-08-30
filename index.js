@@ -182,7 +182,7 @@ function addMiddleware(instance, hook, args) {
 		passParams: true
 	};
 	if(_.isPlainObject(args[args.length - 1])) {
-		mwOpts = _.default(args.pop(), mwOpts);
+		mwOpts = _.defaults(args.pop(), mwOpts);
 	}
 	let mw = [];
 	if (!cache.middleware[hook]) {

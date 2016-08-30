@@ -178,6 +178,12 @@ function parseHook(hook) {
 function addMiddleware(instance, hook, args) {
 	const fns = _.flatten(args);
 	const cache = instance.__grappling;
+	let mwOpts = {
+		passParams: true
+	};
+	if(_.isPlainObject(args[args.length - 1])) {
+		mwOpts = _.default(args.pop(), mwOpts);
+	}
 	let mw = [];
 	if (!cache.middleware[hook]) {
 		if (cache.opts.strict) throw new Error('Hooks for ' + hook + ' are not supported.');
@@ -185,6 +191,7 @@ function addMiddleware(instance, hook, args) {
 		mw = cache.middleware[hook];
 	}
 	cache.middleware[hook] = mw.concat(fns);
+	cache.mwopts[hook] = mwOpts;
 }
 
 function attachQualifier(instance, qualifier) {
@@ -245,6 +252,7 @@ function init(name, opts) {
 	}
 	this.__grappling = {
 		middleware: {},
+		mwopts: {},
 		opts      : _.defaults({}, opts, presets, {
 			strict        : true,
 			qualifiers    : {
@@ -301,6 +309,7 @@ function iterateAsyncMiddleware(context, middleware, args, done) {
 		};
 	};
 	async.eachSeries(middleware, function(callback, next) {
+
 		const d = callback.length - args.length;
 		switch (d) {
 			case 1: //async series
@@ -380,12 +389,14 @@ function createSyncHooks(instance, config) {
 			var ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
 			const args = _.toArray(arguments);
 			let middleware = instance.getMiddleware(q.pre + ':' + hookObj.name);
+			var preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
 			let result;
 			middleware.push(function() {
-				result = fn.apply(ctx, args);
+				result = fn.apply(ctx, preArgs);
 			});
 			middleware = middleware.concat(instance.getMiddleware(q.post + ':' + hookObj.name));
-			iterateSyncMiddleware(ctx, middleware, args);
+			var postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+			iterateSyncMiddleware(ctx, middleware, postArgs);
 			return result;
 		};
 	});
@@ -428,7 +439,8 @@ function doAsync(instance, hookObj, fn, args, done) {
 	var results;
 	dezalgofy(function(safeDone) {
 		async.series([function(next) {
-			iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), args, next);
+			var preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
+			iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), preArgs, next);
 		}, function(next) {
 			fn.apply(instance, args.concat(function() {
 				var args = _.toArray(arguments);
@@ -437,7 +449,8 @@ function doAsync(instance, hookObj, fn, args, done) {
 				next(err);
 			}));
 		}, function(next) {
-			iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), args, next);
+			var postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+			iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), postArgs, next);
 		}], function(err) {
 			safeDone.apply(null, [err].concat(results));
 		});
@@ -453,14 +466,16 @@ function doTheanable(instance, hookObj, fn, args) {
 		deferred.reject = reject;
 	});
 	async.series([function(next) {
-		iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), args, next);
+		var preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
+		iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), preArgs, next);
 	}, function(next) {
 		fn.apply(instance, args).then(function(result) {
 			deferred.result = result;
 			next();
 		}, next);
 	}, function(next) {
-		iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), args, next);
+		var postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+		iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), postArgs, next);
 	}], function(err) {
 		if (err) {
 			return deferred.reject(err);
@@ -705,12 +720,14 @@ const methods = {
 		params.done = (_.isFunction(params.args[params.args.length - 1]))
 			? params.args.pop()
 			: null;
+
+		var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
 		if (params.done) {
 			dezalgofy((safeDone) => {
-				iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), params.args, safeDone);
+				iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs, safeDone);
 			}, params.done);
 		} else {
-			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), params.args);
+			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
 		}
 		return this;
 	},
@@ -728,7 +745,8 @@ const methods = {
 	 */
 	callSyncHook: function() {
 		const params = parseCallHookParams(this, _.toArray(arguments));
-		iterateSyncMiddleware(params.context, this.getMiddleware(params.hook), params.args);
+		var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
+		iterateSyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
 		return this;
 	},
 
@@ -751,7 +769,8 @@ const methods = {
 			deferred.reject = reject;
 		});
 		dezalgofy((safeDone) => {
-			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), params.args, safeDone);
+			var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
+			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs, safeDone);
 		}, (err) => {
 			if (err) {
 				return deferred.reject(err);
@@ -784,6 +803,26 @@ const methods = {
 	 */
 	hasMiddleware: function(qualifiedHook) {
 		return this.getMiddleware(qualifiedHook).length > 0;
+	},
+
+	getMiddlewareArgs: function(qualifiedHook, args) {
+		const mwOpts = this.__grappling.mwopts[qualifiedHook];
+		if(!mwOpts) {
+			return args;
+		}
+		if(mwOpts.passParams === true) {
+			return args;
+		}
+		else if(_.isNumber(mwOpts.passParams)) {
+			return _.slice(args, 9, mwOpts.passParams);
+		}
+		else if(Array.isArray(mwOpts.passParams)) {
+			var newArgs = _.map(args, function(n) {
+				return _.nth(args, n);
+			});
+			return newArgs;
+		}
+		return args;
 	}
 };
 

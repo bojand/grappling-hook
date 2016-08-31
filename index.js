@@ -817,6 +817,9 @@ var methods = {
 		if(mwOpts.passParams === true) {
 			return args;
 		}
+		else if(!mwOpts.passParams) {
+			return [];
+		}
 		else if(_.isNumber(mwOpts.passParams)) {
 			return _.slice(args, 9, mwOpts.passParams);
 		}

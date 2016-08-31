@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/keystonejs/grappling-hook",
   "dependencies": {
-    "lodash": "^4.0.0"
+    "lodash": "4.10.0"
   },
   "devDependencies": {
     "bluebird": "^3.1.1",
@@ -46,6 +46,6 @@
   },
   "tonicExampleFilename": "tonicExample.js",
   "engines": {
-    "node": ">=4.0.0"
+    "node": ">=0.10.0"
   }
 }

@@ -35,7 +35,7 @@
  * @callback middleware
  * @param {...*} [parameters] - parameters passed to the hook
  * @param {function} [next] - pass control to the next middleware
- * @param {function} [done] - mark parallel middleware to have completed
+ * @param {function} [done] - mark parallel middleware to have compvared
  */
 
 /**
@@ -84,8 +84,8 @@
  * @see {@link module:grappling-hook.isThenable isThenable}
  */
 
-const _ = require('lodash');
-let async = {};
+var _ = require('lodash');
+var async = {};
 
 /*!
  *=====================================
@@ -131,16 +131,16 @@ async.eachSeries = function(arr, iterator, callback) {
 	if (!arr.length) {
 		return callback();
 	}
-	var completed = 0;
+	var compvared = 0;
 	var iterate = function() {
-		iterator(arr[completed], function(err) {
+		iterator(arr[compvared], function(err) {
 			if (err) {
 				callback(err);
 				callback = _.noop;
 			}
 			else {
-				completed += 1;
-				if (completed >= arr.length) {
+				compvared += 1;
+				if (compvared >= arr.length) {
 					callback();
 				}
 				else {
@@ -155,13 +155,13 @@ async.eachSeries = function(arr, iterator, callback) {
  *=====================================
  */
 
-const presets = {};
+var presets = {};
 
 function parseHook(hook) {
-	const parsed = (hook)
+	var parsed = (hook)
 		? hook.split(':')
 		: [];
-	const n = parsed.length;
+	var n = parsed.length;
 	return {
 		type: parsed[n - 2],
 		name: parsed[n - 1]
@@ -176,15 +176,15 @@ function parseHook(hook) {
  * @private
  */
 function addMiddleware(instance, hook, args) {
-	const fns = _.flatten(args);
-	const cache = instance.__grappling;
-	let mwOpts = {
+	var fns = _.flatten(args);
+	var cache = instance.__grappling;
+	var mwOpts = {
 		passParams: true
 	};
 	if(_.isPlainObject(args[args.length - 1])) {
 		mwOpts = _.defaults(args.pop(), mwOpts);
 	}
-	let mw = [];
+	var mw = [];
 	if (!cache.middleware[hook]) {
 		if (cache.opts.strict) throw new Error('Hooks for ' + hook + ' are not supported.');
 	} else {
@@ -226,9 +226,9 @@ function attachQualifier(instance, qualifier) {
 	 * @see {@link GrapplingHook#pre} for registering middleware functions to `post` hooks.
 	 */
 	instance[qualifier] = function() {
-		let fns = _.toArray(arguments);
-		const hookName = fns.shift();
-		let output;
+		var fns = _.toArray(arguments);
+		var hookName = fns.shift();
+		var output;
 		if (fns.length) { //old skool way with callbacks
 			output = this;
 		} else {
@@ -246,7 +246,7 @@ function init(name, opts) {
 		opts = name;
 		name = undefined;
 	}
-	let presets;
+	var presets;
 	if (name) {
 		presets = module.exports.get(name);
 	}
@@ -264,7 +264,7 @@ function init(name, opts) {
 			}
 		})
 	};
-	const q = this.__grappling.opts.qualifiers;
+	var q = this.__grappling.opts.qualifiers;
 	attachQualifier(this, q.pre);
 	attachQualifier(this, q.post);
 }
@@ -274,11 +274,11 @@ function init(name, opts) {
  http://blog.izs.me/post/59142742143/designing-apis-for-asynchrony
  */
 function dezalgofy(fn, done) {
-	let isSync = true;
+	var isSync = true;
 	fn(safeDone); //eslint-disable-line no-use-before-define
 	isSync = false;
 	function safeDone() {
-		const args = _.toArray(arguments);
+		var args = _.toArray(arguments);
 		if (isSync) {
 			process.nextTick(function() {
 				done.apply(null, args);
@@ -295,9 +295,9 @@ function iterateAsyncMiddleware(context, middleware, args, done) {
 				throw err;
 			}
 		};
-	let asyncFinished = false;
-	const waiting = [];
-	const wait = function(callback) {
+	var asyncFinished = false;
+	var waiting = [];
+	var wait = function(callback) {
 		waiting.push(callback);
 		return function(err) {
 			waiting.splice(waiting.indexOf(callback), 1);
@@ -310,7 +310,7 @@ function iterateAsyncMiddleware(context, middleware, args, done) {
 	};
 	async.eachSeries(middleware, function(callback, next) {
 
-		const d = callback.length - args.length;
+		var d = callback.length - args.length;
 		switch (d) {
 			case 1: //async series
 				callback.apply(context, args.concat(next));
@@ -320,8 +320,8 @@ function iterateAsyncMiddleware(context, middleware, args, done) {
 				break;
 			default :
 				//synced
-				let err;
-				let result;
+				var err;
+				var result;
 				try {
 					result = callback.apply(context, args);
 				} catch (e) {
@@ -368,11 +368,11 @@ function qualifyHook(hookObj) {
 
 function createHooks(instance, config) {
 	_.forEach(config, function(fn, hook) {
-		const hookObj = parseHook(hook);
+		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
-			const args = _.toArray(arguments);
+			var args = _.toArray(arguments);
 			var ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
-			const done = args.pop();
+			var done = args.pop();
 			if (!_.isFunction(done)) {
 				throw new Error('Async methods should receive a callback as a final parameter');
 			}
@@ -382,15 +382,15 @@ function createHooks(instance, config) {
 }
 
 function createSyncHooks(instance, config) {
-	const q = instance.__grappling.opts.qualifiers;
+	var q = instance.__grappling.opts.qualifiers;
 	_.forEach(config, function(fn, hook) {
-		const hookObj = parseHook(hook);
+		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			var ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
-			const args = _.toArray(arguments);
-			let middleware = instance.getMiddleware(q.pre + ':' + hookObj.name);
+			var args = _.toArray(arguments);
+			var middleware = instance.getMiddleware(q.pre + ':' + hookObj.name);
 			var preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
-			let result;
+			var result;
 			middleware.push(function() {
 				result = fn.apply(ctx, preArgs);
 			});
@@ -404,9 +404,9 @@ function createSyncHooks(instance, config) {
 
 function createThenableHooks(instance, config) {
 	_.forEach(config, function(fn, hook) {
-		const hookObj = parseHook(hook);
+		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
-			const args = _.toArray(arguments);
+			var args = _.toArray(arguments);
 			var ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
 			return doTheanable(ctx, hookObj, fn, args);
 		};
@@ -487,11 +487,11 @@ function doTheanable(instance, hookObj, fn, args) {
 }
 
 function addHooks(instance, args) {
-	const config = {};
-	_.forEach(args, (mixed) => {
+	var config = {};
+	_.forEach(args, function (mixed) {
 		if (_.isString(mixed)) {
-			const hookObj = parseHook(mixed);
-			const fn = instance[hookObj.name];
+			var hookObj = parseHook(mixed);
+			var fn = instance[hookObj.name];
 			if (!fn) throw new Error('Cannot add hooks to undeclared method:"' + hookObj.name + '"'); //non-existing method
 			config[mixed] = fn;
 		} else if (_.isObject(mixed)) {
@@ -519,7 +519,7 @@ function parseCallHookParams(instance, args) {
  * @alias GrapplingHook
  * @mixin
  */
-const methods = {
+var methods = {
 
 	/**
 	 * Adds middleware to a qualified hook.
@@ -537,9 +537,9 @@ const methods = {
 	 * @returns {GrapplingHook|thenable}
 	 */
 	hook: function() {
-		let fns = _.toArray(arguments);
-		const hook = fns.shift();
-		let output;
+		var fns = _.toArray(arguments);
+		var hook = fns.shift();
+		var output;
 		qualifyHook(parseHook(hook));
 		if (fns.length) {
 			output = this;
@@ -572,11 +572,11 @@ const methods = {
 	 * @returns {GrapplingHook}
 	 */
 	unhook: function() {
-		const fns = _.toArray(arguments);
-		const hook = fns.shift();
-		const hookObj = parseHook(hook);
-		const middleware = this.__grappling.middleware;
-		const q = this.__grappling.opts.qualifiers;
+		var fns = _.toArray(arguments);
+		var hook = fns.shift();
+		var hookObj = parseHook(hook);
+		var middleware = this.__grappling.middleware;
+		var q = this.__grappling.opts.qualifiers;
 		if (hookObj.type || fns.length) {
 			qualifyHook(hookObj);
 			if (middleware[hook]) {
@@ -590,7 +590,7 @@ const methods = {
 			/* istanbul ignore else: nothing _should_ happen */
 			if (middleware[q.post + ':' + hookObj.name]) middleware[q.post + ':' + hookObj.name] = [];
 		} else {
-			_.forEach(middleware, (callbacks, hook) => {
+			_.forEach(middleware, function(callbacks, hook) {
 				middleware[hook] = [];
 			});
 		}
@@ -607,10 +607,11 @@ const methods = {
 		if (!this.__grappling.opts.strict) {
 			return true;
 		}
-		const args = _.flatten(_.toArray(arguments));
-		return _.every(args, (qualifiedHook) => {
+		var args = _.flatten(_.toArray(arguments));
+		var self = this;
+		return _.every(args, function (qualifiedHook) {
 			qualifyHook(parseHook(qualifiedHook));
-			return !!this.__grappling.middleware[qualifiedHook];
+			return !!self.__grappling.middleware[qualifiedHook];
 		});
 	},
 
@@ -621,14 +622,15 @@ const methods = {
 	 * @returns {GrapplingHook}
 	 */
 	allowHooks: function() {
-		const args = _.flatten(_.toArray(arguments));
-		const q = this.__grappling.opts.qualifiers;
-		_.forEach(args, (hook) => {
+		var args = _.flatten(_.toArray(arguments));
+		var q = this.__grappling.opts.qualifiers;
+		var self = this;
+		_.forEach(args, function (hook) {
 			if (!_.isString(hook)) {
 				throw new Error('`allowHooks` expects (arrays of) Strings');
 			}
-			const hookObj = parseHook(hook);
-			const middleware = this.__grappling.middleware;
+			var hookObj = parseHook(hook);
+			var middleware = self.__grappling.middleware;
 			if (hookObj.type) {
 				if (hookObj.type !== q.pre && hookObj.type !== q.post) {
 					throw new Error('Only "' + q.pre + '" and "' + q.post + '" types are allowed, not "' + hookObj.type + '"');
@@ -662,7 +664,7 @@ const methods = {
 	 * @returns {GrapplingHook}
 	 */
 	addHooks: function() {
-		const config = addHooks(this, _.flatten(_.toArray(arguments)));
+		var config = addHooks(this, _.flatten(_.toArray(arguments)));
 		createHooks(this, config);
 		return this;
 	},
@@ -677,7 +679,7 @@ const methods = {
 	 * @returns {GrapplingHook}
 	 */
 	addSyncHooks: function() {
-		const config = addHooks(this, _.flatten(_.toArray(arguments)));
+		var config = addHooks(this, _.flatten(_.toArray(arguments)));
 		createSyncHooks(this, config);
 		return this;
 	},
@@ -692,13 +694,13 @@ const methods = {
 	 * @returns {GrapplingHook}
 	 */
 	addThenableHooks: function() {
-		const config = addHooks(this, _.flatten(_.toArray(arguments)));
+		var config = addHooks(this, _.flatten(_.toArray(arguments)));
 		createThenableHooks(this, config);
 		return this;
 	},
 
 	addDynamicHooks: function() {
-		const config = addHooks(this, _.flatten(_.toArray(arguments)));
+		var config = addHooks(this, _.flatten(_.toArray(arguments)));
 		createDynamicHooks(this, config);
 		return this;
 	},
@@ -716,15 +718,16 @@ const methods = {
 	 */
 	callHook: function() {
 		//todo: decide whether we should enforce passing a callback
-		const params = parseCallHookParams(this, _.toArray(arguments));
+		var params = parseCallHookParams(this, _.toArray(arguments));
 		params.done = (_.isFunction(params.args[params.args.length - 1]))
 			? params.args.pop()
 			: null;
 
 		var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
 		if (params.done) {
-			dezalgofy((safeDone) => {
-				iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs, safeDone);
+			var self = this;
+			dezalgofy(function (safeDone) {
+				iterateAsyncMiddleware(params.context, self.getMiddleware(params.hook), hookArgs, safeDone);
 			}, params.done);
 		} else {
 			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
@@ -744,7 +747,7 @@ const methods = {
 	 * @returns {GrapplingHook}
 	 */
 	callSyncHook: function() {
-		const params = parseCallHookParams(this, _.toArray(arguments));
+		var params = parseCallHookParams(this, _.toArray(arguments));
 		var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
 		iterateSyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
 		return this;
@@ -762,16 +765,17 @@ const methods = {
 	 * @returns {thenable} - a thenable, as created with {@link options}.createThenable
 	 */
 	callThenableHook: function() {
-		const params = parseCallHookParams(this, _.toArray(arguments));
-		const deferred = {};
-		const thenable = this.__grappling.opts.createThenable(function(resolve, reject) {
+		var params = parseCallHookParams(this, _.toArray(arguments));
+		var deferred = {};
+		var thenable = this.__grappling.opts.createThenable(function(resolve, reject) {
 			deferred.resolve = resolve;
 			deferred.reject = reject;
 		});
-		dezalgofy((safeDone) => {
-			var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
-			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs, safeDone);
-		}, (err) => {
+		var self = this;
+		dezalgofy(function (safeDone) {
+			var hookArgs = self.getMiddlewareArgs(params.hook, params.args);
+			iterateAsyncMiddleware(params.context, self.getMiddleware(params.hook), hookArgs, safeDone);
+		}, function (err) {
 			if (err) {
 				return deferred.reject(err);
 			}
@@ -788,7 +792,7 @@ const methods = {
 	 */
 	getMiddleware: function(qualifiedHook) {
 		qualifyHook(parseHook(qualifiedHook));
-		const middleware = this.__grappling.middleware[qualifiedHook];
+		var middleware = this.__grappling.middleware[qualifiedHook];
 		if (middleware) {
 			return middleware.slice(0);
 		}
@@ -806,7 +810,7 @@ const methods = {
 	},
 
 	getMiddlewareArgs: function(qualifiedHook, args) {
-		const mwOpts = this.__grappling.mwopts[qualifiedHook];
+		var mwOpts = this.__grappling.mwopts[qualifiedHook];
 		if(!mwOpts) {
 			return args;
 		}
@@ -864,7 +868,7 @@ module.exports = {
 	 * grappling.mixin(instance); // add grappling-hook functionality to an existing object
 	 */
 	mixin: function mixin(instance, presets, opts) {//eslint-disable-line no-unused-vars
-		const args = _.toArray(arguments);
+		var args = _.toArray(arguments);
 		instance = args.shift();
 		init.apply(instance, args);
 		_.assignIn(instance, methods);
@@ -913,14 +917,15 @@ module.exports = {
 		var options = _.defaults({}, opts, {
 			attachToPrototype: false
 		});
-		const proto = (base.prototype)
+		var proto = (base.prototype)
 			? base.prototype
 			: base;
 		_.forEach(methods, function(fn, methodName) {
 			proto[methodName] = function() {
 				init.call(this, presets, options);
-				_.forEach(methods, (fn, methodName) => {
-					this[methodName] = fn.bind(this);
+				var self = this;
+				_.forEach(methods, function (fn, methodName) {
+					self[methodName] = fn.bind(self);
 				});
 				return fn.apply(this, _.toArray(arguments));
 			};

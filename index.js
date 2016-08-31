@@ -176,7 +176,6 @@ function parseHook(hook) {
  * @private
  */
 function addMiddleware(instance, hook, args) {
-	var fns = _.flatten(args);
 	var cache = instance.__grappling;
 	var mwOpts = {
 		passParams: true
@@ -184,6 +183,7 @@ function addMiddleware(instance, hook, args) {
 	if(_.isPlainObject(args[args.length - 1])) {
 		mwOpts = _.defaults(args.pop(), mwOpts);
 	}
+	var fns = _.flatten(args);
 	var mw = [];
 	if (!cache.middleware[hook]) {
 		if (cache.opts.strict) throw new Error('Hooks for ' + hook + ' are not supported.');

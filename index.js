@@ -366,16 +366,28 @@ function qualifyHook(hookObj) {
 	return hookObj;
 }
 
-function createHooks(instance, config) {
+function createHooks(instance, config, flexible) {
 	_.forEach(config, function(fn, hook) {
 		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			var args = _.toArray(arguments);
 			var ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
-			var done = args.pop();
-			if (!_.isFunction(done)) {
-				throw new Error('Async methods should receive a callback as a final parameter');
+			var done = null;
+			if(!flexible) {
+				done = args.pop();
+				if (!_.isFunction(done)) {
+					throw new Error('Async methods should receive a callback as a final parameter');
+				}
 			}
+			else {
+				if(args.length && _.isFunction(args[args.length - 1])) {
+					done = args.pop();
+				}
+				else {
+					done = _.noop;
+				}
+			}
+
 			doAsync(ctx, hookObj, fn, args, done);
 		};
 	});
@@ -421,14 +433,11 @@ function createDynamicHooks(instance, config) {
 			var ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
 			var last = null;
 			if(args.length && _.isFunction(args[args.length - 1])) {
-				last = args[args.length - 1];
-			}
-			if (!_.isFunction(last)) {
-				return doTheanable(ctx, hookObj, fn, args);
-			}
-			else {
 				last = args.pop();
 				doAsync(ctx, hookObj, fn, args, last);
+			}
+			else {
+				return doTheanable(ctx, hookObj, fn, args);
 			}
 		};
 	});
@@ -666,6 +675,12 @@ var methods = {
 	addHooks: function() {
 		var config = addHooks(this, _.flatten(_.toArray(arguments)));
 		createHooks(this, config);
+		return this;
+	},
+
+	addFlexibleHooks: function() {
+		var config = addHooks(this, _.flatten(_.toArray(arguments)));
+		createHooks(this, config, true);
 		return this;
 	},
 

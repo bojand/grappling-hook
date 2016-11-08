@@ -4,7 +4,7 @@
  *
  * Copyright 2015-2016 Keystone.js
  * Released under the MIT license
- * 
+ *
  */
 
 'use strict';
@@ -50,7 +50,7 @@
  * var instance = grappling.create({
  *   qualifiers: {
  *     pre: 'before',
- *     post: 'after'	
+ *     post: 'after'
  *   }
  * });
  * instance.before('save', console.log);
@@ -91,7 +91,7 @@ var async = {};
  *=====================================
  * Parts copied from/based on         *
  *=====================================
- * 
+ *
  * async
  * https://github.com/caolan/async
  *
@@ -176,8 +176,14 @@ function parseHook(hook) {
  * @private
  */
 function addMiddleware(instance, hook, args) {
-	var fns = _.flatten(args);
 	var cache = instance.__grappling;
+	var mwOpts = {
+		passParams: true
+	};
+	if (_.isPlainObject(args[args.length - 1])) {
+		mwOpts = _.defaults(args.pop(), mwOpts);
+	}
+	var fns = _.flatten(args);
 	var mw = [];
 	if (!cache.middleware[hook]) {
 		if (cache.opts.strict) throw new Error('Hooks for ' + hook + ' are not supported.');
@@ -185,6 +191,7 @@ function addMiddleware(instance, hook, args) {
 		mw = cache.middleware[hook];
 	}
 	cache.middleware[hook] = mw.concat(fns);
+	cache.mwopts[hook] = mwOpts;
 }
 
 function attachQualifier(instance, qualifier) {
@@ -246,6 +253,7 @@ function init(name, opts) {
 	}
 	this.__grappling = {
 		middleware: {},
+		mwopts: {},
 		opts: _.defaults({}, opts, presets, {
 			strict: true,
 			qualifiers: {
@@ -263,7 +271,7 @@ function init(name, opts) {
 }
 
 /*
- based on code from Isaac Schlueter's blog post: 
+ based on code from Isaac Schlueter's blog post:
  http://blog.izs.me/post/59142742143/designing-apis-for-asynchrony
  */
 function dezalgofy(fn, done) {
@@ -359,33 +367,28 @@ function qualifyHook(hookObj) {
 	return hookObj;
 }
 
-function createHooks(instance, config) {
-	var q = instance.__grappling.opts.qualifiers;
+function createHooks(instance, config, flexible) {
 	_.forEach(config, function (fn, hook) {
 		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function () {
 			var args = _.toArray(arguments);
-			var done = args.pop();
-			if (!_.isFunction(done)) {
-				throw new Error('Async methods should receive a callback as a final parameter');
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			var done = null;
+
+			if (!flexible) {
+				done = args.pop();
+				if (!_.isFunction(done)) {
+					throw new Error('Async methods should receive a callback as a final parameter');
+				}
+			} else {
+				if (args.length && _.isFunction(args[args.length - 1])) {
+					done = args.pop();
+				} else {
+					done = _.noop;
+				}
 			}
-			var results = void 0;
-			dezalgofy(function (safeDone) {
-				async.series([function (next) {
-					iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), args, next);
-				}, function (next) {
-					fn.apply(instance, args.concat(function () {
-						var args = _.toArray(arguments);
-						var err = args.shift();
-						results = args;
-						next(err);
-					}));
-				}, function (next) {
-					iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), args, next);
-				}], function (err) {
-					safeDone.apply(null, [err].concat(results));
-				});
-			}, done);
+
+			doAsync(ctx, hookObj, fn, args, done);
 		};
 	});
 }
@@ -395,50 +398,100 @@ function createSyncHooks(instance, config) {
 	_.forEach(config, function (fn, hook) {
 		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function () {
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
 			var args = _.toArray(arguments);
 			var middleware = instance.getMiddleware(q.pre + ':' + hookObj.name);
+			var preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
 			var result = void 0;
 			middleware.push(function () {
-				result = fn.apply(instance, args);
+				result = fn.apply(ctx, preArgs);
 			});
 			middleware = middleware.concat(instance.getMiddleware(q.post + ':' + hookObj.name));
-			iterateSyncMiddleware(instance, middleware, args);
+			var postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+			iterateSyncMiddleware(ctx, middleware, postArgs);
 			return result;
 		};
 	});
 }
 
 function createThenableHooks(instance, config) {
-	var opts = instance.__grappling.opts;
-	var q = instance.__grappling.opts.qualifiers;
 	_.forEach(config, function (fn, hook) {
 		var hookObj = parseHook(hook);
 		instance[hookObj.name] = function () {
 			var args = _.toArray(arguments);
-			var deferred = {};
-			var thenable = opts.createThenable(function (resolve, reject) {
-				deferred.resolve = resolve;
-				deferred.reject = reject;
-			});
-			async.series([function (next) {
-				iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), args, next);
-			}, function (next) {
-				fn.apply(instance, args).then(function (result) {
-					deferred.result = result;
-					next();
-				}, next);
-			}, function (next) {
-				iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), args, next);
-			}], function (err) {
-				if (err) {
-					return deferred.reject(err);
-				}
-				return deferred.resolve(deferred.result);
-			});
-
-			return thenable;
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			return doTheanable(ctx, hookObj, fn, args);
 		};
 	});
+}
+
+function createDynamicHooks(instance, config) {
+	_.each(config, function (fn, hook) {
+		var hookObj = parseHook(hook);
+		instance[hookObj.name] = function () {
+			var args = _.toArray(arguments);
+			var ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			var last = null;
+			if (args.length && _.isFunction(args[args.length - 1])) {
+				last = args.pop();
+				doAsync(ctx, hookObj, fn, args, last);
+			} else {
+				return doTheanable(ctx, hookObj, fn, args);
+			}
+		};
+	});
+}
+
+function doAsync(instance, hookObj, fn, args, done) {
+	var q = instance.__grappling.opts.qualifiers;
+	var results = void 0;
+	dezalgofy(function (safeDone) {
+		async.series([function (next) {
+			var preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
+			iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), preArgs, next);
+		}, function (next) {
+			fn.apply(instance, args.concat(function () {
+				var args = _.toArray(arguments);
+				var err = args.shift();
+				results = args;
+				next(err);
+			}));
+		}, function (next) {
+			var postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+			iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), postArgs, next);
+		}], function (err) {
+			safeDone.apply(null, [err].concat(results));
+		});
+	}, done);
+}
+
+function doTheanable(instance, hookObj, fn, args) {
+	var opts = instance.__grappling.opts;
+	var q = instance.__grappling.opts.qualifiers;
+	var deferred = {};
+	var thenable = opts.createThenable(function (resolve, reject) {
+		deferred.resolve = resolve;
+		deferred.reject = reject;
+	});
+	async.series([function (next) {
+		var preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
+		iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), preArgs, next);
+	}, function (next) {
+		fn.apply(instance, args).then(function (result) {
+			deferred.result = result;
+			next();
+		}, next);
+	}, function (next) {
+		var postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+		iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), postArgs, next);
+	}], function (err) {
+		if (err) {
+			return deferred.reject(err);
+		}
+		return deferred.resolve(deferred.result);
+	});
+
+	return thenable;
 }
 
 function _addHooks(instance, args) {
@@ -623,6 +676,12 @@ var methods = {
 		return this;
 	},
 
+	addFlexibleHooks: function addFlexibleHooks() {
+		var config = _addHooks(this, _.flatten(_.toArray(arguments)));
+		createHooks(this, config, true);
+		return this;
+	},
+
 	/**
   * Wraps synchronous methods/functions with `pre` and/or `post` hooks
   * @since 2.4.0
@@ -653,6 +712,12 @@ var methods = {
 		return this;
 	},
 
+	addDynamicHooks: function addDynamicHooks() {
+		var config = _addHooks(this, _.flatten(_.toArray(arguments)));
+		createDynamicHooks(this, config);
+		return this;
+	},
+
 	/**
   * Calls all middleware subscribed to the asynchronous `qualifiedHook` and passes remaining parameters to them
   * @instance
@@ -675,12 +740,14 @@ var methods = {
 		}
 		var params = parseCallHookParams(this, args);
 		params.done = _.isFunction(params.args[params.args.length - 1]) ? params.args.pop() : null;
+
+		var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
 		if (params.done) {
 			dezalgofy(function (safeDone) {
-				iterateAsyncMiddleware(params.context, _this3.getMiddleware(params.hook), params.args, safeDone);
+				iterateAsyncMiddleware(params.context, _this3.getMiddleware(params.hook), hookArgs, safeDone);
 			}, params.done);
 		} else {
-			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), params.args);
+			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
 		}
 		return this;
 	},
@@ -703,7 +770,8 @@ var methods = {
 			args[i] = arguments[i];
 		}
 		var params = parseCallHookParams(this, args);
-		iterateSyncMiddleware(params.context, this.getMiddleware(params.hook), params.args);
+		var hookArgs = this.getMiddlewareArgs(params.hook, params.args);
+		iterateSyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
 		return this;
 	},
 
@@ -728,7 +796,8 @@ var methods = {
 			deferred.reject = reject;
 		});
 		dezalgofy(function (safeDone) {
-			iterateAsyncMiddleware(params.context, _this4.getMiddleware(params.hook), params.args, safeDone);
+			var hookArgs = _this4.getMiddlewareArgs(params.hook, params.args);
+			iterateAsyncMiddleware(params.context, _this4.getMiddleware(params.hook), hookArgs, safeDone);
 		}, function (err) {
 			if (err) {
 				return deferred.reject(err);
@@ -761,6 +830,25 @@ var methods = {
   */
 	hasMiddleware: function hasMiddleware(qualifiedHook) {
 		return this.getMiddleware(qualifiedHook).length > 0;
+	},
+
+	getMiddlewareArgs: function getMiddlewareArgs(qualifiedHook, args) {
+		var mwOpts = this.__grappling.mwopts[qualifiedHook];
+		if (!mwOpts) {
+			return args;
+		}
+		if (mwOpts.passParams === true) {
+			return args;
+		} else if (!mwOpts.passParams) {
+			return [];
+		} else if (_.isNumber(mwOpts.passParams)) {
+			return _.slice(args, 9, mwOpts.passParams);
+		} else if (Array.isArray(mwOpts.passParams)) {
+			return _.map(args, function (n) {
+				return _.nth(args, n);
+			});
+		}
+		return args;
 	}
 };
 
@@ -857,17 +945,19 @@ module.exports = {
   */
 	attach: function attach(base, presets, opts) {
 		//eslint-disable-line no-unused-vars
-		var args = new Array(arguments.length);
-		for (var i = 0; i < args.length; ++i) {
-			args[i] = arguments[i];
+		if (!opts && _.isObject(presets)) {
+			opts = presets;
+			presets = undefined;
 		}
-		args.shift();
+		var options = _.defaults({}, opts, {
+			attachToProtoype: false
+		});
 		var proto = base.prototype ? base.prototype : base;
 		_.forEach(methods, function (fn, methodName) {
 			proto[methodName] = function () {
 				var _this5 = this;
 
-				init.apply(this, args);
+				init.call(this, presets, options);
 				_.forEach(methods, function (fn, methodName) {
 					_this5[methodName] = fn.bind(_this5);
 				});

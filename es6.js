@@ -4,7 +4,7 @@
  *
  * Copyright 2015-2016 Keystone.js
  * Released under the MIT license
- * 
+ *
  */
 
 'use strict';
@@ -50,7 +50,7 @@
  * var instance = grappling.create({
  *   qualifiers: {
  *     pre: 'before',
- *     post: 'after'	
+ *     post: 'after'
  *   }
  * });
  * instance.before('save', console.log);
@@ -91,7 +91,7 @@ let async = {};
  *=====================================
  * Parts copied from/based on         *
  *=====================================
- * 
+ *
  * async
  * https://github.com/caolan/async
  *
@@ -180,8 +180,14 @@ function parseHook(hook) {
  * @private
  */
 function addMiddleware(instance, hook, args) {
-	const fns = _.flatten(args);
 	const cache = instance.__grappling;
+	let mwOpts = {
+		passParams: true
+	};
+	if(_.isPlainObject(args[args.length - 1])) {
+		mwOpts = _.defaults(args.pop(), mwOpts);
+	}
+	const fns = _.flatten(args);
 	let mw = [];
 	if (!cache.middleware[hook]) {
 		if (cache.opts.strict) throw new Error('Hooks for ' + hook + ' are not supported.');
@@ -189,6 +195,7 @@ function addMiddleware(instance, hook, args) {
 		mw = cache.middleware[hook];
 	}
 	cache.middleware[hook] = mw.concat(fns);
+	cache.mwopts[hook] = mwOpts;
 }
 
 function attachQualifier(instance, qualifier) {
@@ -249,6 +256,7 @@ function init(name, opts) {
 	}
 	this.__grappling = {
 		middleware: {},
+		mwopts: {},
 		opts      : _.defaults({}, opts, presets, {
 			strict        : true,
 			qualifiers    : {
@@ -266,7 +274,7 @@ function init(name, opts) {
 }
 
 /*
- based on code from Isaac Schlueter's blog post: 
+ based on code from Isaac Schlueter's blog post:
  http://blog.izs.me/post/59142742143/designing-apis-for-asynchrony
  */
 function dezalgofy(fn, done) {
@@ -362,33 +370,30 @@ function qualifyHook(hookObj) {
 	return hookObj;
 }
 
-function createHooks(instance, config) {
-	const q = instance.__grappling.opts.qualifiers;
+function createHooks(instance, config, flexible) {
 	_.forEach(config, function(fn, hook) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			const args = _.toArray(arguments);
-			const done = args.pop();
-			if (!_.isFunction(done)) {
-				throw new Error('Async methods should receive a callback as a final parameter');
+			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			let done = null;
+
+			if(!flexible) {
+				done = args.pop();
+				if (!_.isFunction(done)) {
+					throw new Error('Async methods should receive a callback as a final parameter');
+				}
 			}
-			let results;
-			dezalgofy(function(safeDone) {
-				async.series([function(next) {
-					iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), args, next);
-				}, function(next) {
-					fn.apply(instance, args.concat(function() {
-						const args = _.toArray(arguments);
-						const err = args.shift();
-						results = args;
-						next(err);
-					}));
-				}, function(next) {
-					iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), args, next);
-				}], function(err) {
-					safeDone.apply(null, [err].concat(results));
-				});
-			}, done);
+			else {
+				if(args.length && _.isFunction(args[args.length - 1])) {
+					done = args.pop();
+				}
+				else {
+					done = _.noop;
+				}
+			}
+
+ 			doAsync(ctx, hookObj, fn, args, done);
 		};
 	});
 }
@@ -398,50 +403,101 @@ function createSyncHooks(instance, config) {
 	_.forEach(config, function(fn, hook) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
+			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
 			const args = _.toArray(arguments);
 			let middleware = instance.getMiddleware(q.pre + ':' + hookObj.name);
+			let preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
 			let result;
 			middleware.push(function() {
-				result = fn.apply(instance, args);
+				result = fn.apply(ctx, preArgs);
 			});
 			middleware = middleware.concat(instance.getMiddleware(q.post + ':' + hookObj.name));
-			iterateSyncMiddleware(instance, middleware, args);
+			let postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+ 			iterateSyncMiddleware(ctx, middleware, postArgs);
 			return result;
 		};
 	});
 }
 
 function createThenableHooks(instance, config) {
-	const opts = instance.__grappling.opts;
-	const q = instance.__grappling.opts.qualifiers;
 	_.forEach(config, function(fn, hook) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			const args = _.toArray(arguments);
-			const deferred = {};
-			const thenable = opts.createThenable(function(resolve, reject) {
-				deferred.resolve = resolve;
-				deferred.reject = reject;
-			});
-			async.series([function(next) {
-				iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), args, next);
-			}, function(next) {
-				fn.apply(instance, args).then(function(result) {
-					deferred.result = result;
-					next();
-				}, next);
-			}, function(next) {
-				iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), args, next);
-			}], function(err) {
-				if (err) {
-					return deferred.reject(err);
-				}
-				return deferred.resolve(deferred.result);
-			});
-
-			return thenable;
+			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			return doTheanable(ctx, hookObj, fn, args);
 		};
 	});
+}
+
+function createDynamicHooks(instance, config) {
+	_.each(config, function(fn, hook) {
+		const hookObj = parseHook(hook);
+		instance[hookObj.name] = function() {
+			const args = _.toArray(arguments);
+			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			let last = null;
+			if(args.length && _.isFunction(args[args.length - 1])) {
+				last = args.pop();
+				doAsync(ctx, hookObj, fn, args, last);
+			}
+			else {
+				return doTheanable(ctx, hookObj, fn, args);
+			}
+		};
+	});
+}
+
+function doAsync(instance, hookObj, fn, args, done) {
+	const q = instance.__grappling.opts.qualifiers;
+	let results;
+	dezalgofy(function(safeDone) {
+		async.series([function(next) {
+			let preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
+			iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), preArgs, next);
+		}, function(next) {
+			fn.apply(instance, args.concat(function() {
+				const args = _.toArray(arguments);
+				const err = args.shift();
+				results = args;
+				next(err);
+			}));
+		}, function(next) {
+			let postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+			iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), postArgs, next);
+		}], function(err) {
+			safeDone.apply(null, [err].concat(results));
+		});
+	}, done);
+}
+
+function doTheanable(instance, hookObj, fn, args) {
+	const opts = instance.__grappling.opts;
+	const q = instance.__grappling.opts.qualifiers;
+	const deferred = {};
+	const thenable = opts.createThenable(function(resolve, reject) {
+		deferred.resolve = resolve;
+		deferred.reject = reject;
+	});
+	async.series([function(next) {
+		let preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
+		iterateAsyncMiddleware(instance, instance.getMiddleware(q.pre + ':' + hookObj.name), preArgs, next);
+	}, function(next) {
+		fn.apply(instance, args).then(function(result) {
+			deferred.result = result;
+			next();
+		}, next);
+	}, function(next) {
+		let postArgs = instance.getMiddlewareArgs(q.post + ':' + hookObj.name, args);
+		iterateAsyncMiddleware(instance, instance.getMiddleware(q.post + ':' + hookObj.name), postArgs, next);
+	}], function(err) {
+		if (err) {
+			return deferred.reject(err);
+		}
+		return deferred.resolve(deferred.result);
+	});
+
+	return thenable;
 }
 
 function addHooks(instance, args) {
@@ -625,6 +681,12 @@ const methods = {
 		return this;
 	},
 
+	addFlexibleHooks: function() {
+ 		var config = addHooks(this, _.flatten(_.toArray(arguments)));
+ 		createHooks(this, config, true);
+ 		return this;
+ 	},
+
 	/**
 	 * Wraps synchronous methods/functions with `pre` and/or `post` hooks
 	 * @since 2.4.0
@@ -655,6 +717,12 @@ const methods = {
 		return this;
 	},
 
+	addDynamicHooks: function() {
+		const config = addHooks(this, _.flatten(_.toArray(arguments)));
+		createDynamicHooks(this, config);
+		return this;
+	},
+
 	/**
 	 * Calls all middleware subscribed to the asynchronous `qualifiedHook` and passes remaining parameters to them
 	 * @instance
@@ -677,12 +745,14 @@ const methods = {
 		params.done = (_.isFunction(params.args[params.args.length - 1]))
 			? params.args.pop()
 			: null;
+
+		let hookArgs = this.getMiddlewareArgs(params.hook, params.args);
 		if (params.done) {
 			dezalgofy((safeDone) => {
-				iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), params.args, safeDone);
+				iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs, safeDone);
 			}, params.done);
 		} else {
-			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), params.args);
+			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
 		}
 		return this;
 	},
@@ -705,7 +775,8 @@ const methods = {
 			args[i] = arguments[i];
 		}
 		const params = parseCallHookParams(this, args);
-		iterateSyncMiddleware(params.context, this.getMiddleware(params.hook), params.args);
+		const hookArgs = this.getMiddlewareArgs(params.hook, params.args);
+		iterateSyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs);
 		return this;
 	},
 
@@ -728,7 +799,8 @@ const methods = {
 			deferred.reject = reject;
 		});
 		dezalgofy((safeDone) => {
-			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), params.args, safeDone);
+			const hookArgs = this.getMiddlewareArgs(params.hook, params.args);
+			iterateAsyncMiddleware(params.context, this.getMiddleware(params.hook), hookArgs, safeDone);
 		}, function(err) {
 			if (err) {
 				return deferred.reject(err);
@@ -761,6 +833,28 @@ const methods = {
 	 */
 	hasMiddleware: function(qualifiedHook) {
 		return this.getMiddleware(qualifiedHook).length > 0;
+	},
+
+	getMiddlewareArgs: function(qualifiedHook, args) {
+		const mwOpts = this.__grappling.mwopts[qualifiedHook];
+		if(!mwOpts) {
+			return args;
+		}
+		if(mwOpts.passParams === true) {
+			return args;
+		}
+		else if(!mwOpts.passParams) {
+ 			return [];
+ 		}
+		else if(_.isNumber(mwOpts.passParams)) {
+			return _.slice(args, 9, mwOpts.passParams);
+		}
+		else if(Array.isArray(mwOpts.passParams)) {
+			return _.map(args, function(n) {
+				return _.nth(args, n);
+			});
+		}
+		return args;
 	}
 };
 
@@ -854,17 +948,19 @@ module.exports = {
 	 * grappling.attach(MyClass); // attach grappling-hook functionality to a 'class'
 	 */
 	attach: function attach(base, presets, opts) {//eslint-disable-line no-unused-vars
-		const args = new Array(arguments.length);
-		for (let i = 0; i < args.length; ++i) {
-			args[i] = arguments[i];
+		if(!opts && _.isObject(presets)) {
+			opts = presets;
+			presets = undefined;
 		}
-		args.shift();
+		const options = _.defaults({}, opts, {
+			attachToProtoype: false
+		});
 		const proto = (base.prototype)
 			? base.prototype
 			: base;
 		_.forEach(methods, function(fn, methodName) {
 			proto[methodName] = function() {
-				init.apply(this, args);
+				init.call(this, presets, options);
 				_.forEach(methods, (fn, methodName) => {
 					this[methodName] = fn.bind(this);
 				});

@@ -375,7 +375,7 @@ function createHooks(instance, config, flexible) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			const args = _.toArray(arguments);
-			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			const ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
 			let done = null;
 
 			if(!flexible) {
@@ -403,7 +403,7 @@ function createSyncHooks(instance, config) {
 	_.forEach(config, function(fn, hook) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
-			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			const ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
 			const args = _.toArray(arguments);
 			let middleware = instance.getMiddleware(q.pre + ':' + hookObj.name);
 			let preArgs = instance.getMiddlewareArgs(q.pre + ':' + hookObj.name, args);
@@ -424,7 +424,7 @@ function createThenableHooks(instance, config) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			const args = _.toArray(arguments);
-			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			const ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
 			return doTheanable(ctx, hookObj, fn, args);
 		};
 	});
@@ -435,7 +435,7 @@ function createDynamicHooks(instance, config) {
 		const hookObj = parseHook(hook);
 		instance[hookObj.name] = function() {
 			const args = _.toArray(arguments);
-			const ctx = instance.__grappling.opts.attachToProtoype ? this : instance;
+			const ctx = instance.__grappling.opts.attachToPrototype ? this : instance;
 			let last = null;
 			if(args.length && _.isFunction(args[args.length - 1])) {
 				last = args.pop();
@@ -953,7 +953,7 @@ module.exports = {
 			presets = undefined;
 		}
 		const options = _.defaults({}, opts, {
-			attachToProtoype: false
+			attachToPrototype: false
 		});
 		const proto = (base.prototype)
 			? base.prototype

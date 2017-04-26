@@ -1,6 +1,6 @@
 {
-  "name": "grappling-hook",
-  "version": "3.0.0",
+  "name": "grappling-hook-lounge",
+  "version": "1.0.0",
   "description": "Pre/Post hooking mechanism",
   "main": "index.js",
   "scripts": {
